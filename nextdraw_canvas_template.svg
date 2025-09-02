@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="966.568750mm" height="578.800000mm"
+     viewBox="-483.284375 -259.400000 966.568750 578.800000">
+  <desc>
+    Two circles (diameter 15.5 mm) spaced 931.068750 mm center-to-center;
+    centered rectangle 863.600000 mm × 558.800000 mm,
+    with its center 30.000000 mm below the circles' centers.
+    All units are millimeters.
+  </desc>
+  <g fill="none" stroke="#FFF" stroke-width="0.2" vector-effect="non-scaling-stroke">
+    <!-- Circles -->
+    <circle cx="-465.534375" cy="0.000000" r="7.750000" />
+    <circle cx="465.534375" cy="0.000000" r="7.750000" />
+    <!-- Rectangle -->
+    <rect x="-431.800000" y="-249.400000" width="863.600000" height="558.800000" />
+  </g>
+</svg>

@@ -28,6 +28,44 @@
   .error{color:#b00020}
   .preview{max-width:640px;width:100%;border-radius:12px;border:1px solid #eee}
   .badge{display:inline-block;background:#efefef;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:6px}
+  
+  /* Loading bar styles */
+  .loading-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    display: none;
+  }
+  
+  .loading-bar {
+    width: 300px;
+    height: 20px;
+    background: #f0f0f0;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  
+  .loading-progress {
+    height: 100%;
+    background: linear-gradient(90deg, #007bff, #0056b3);
+    transition: width 0.3s ease;
+    width: 0%;
+  }
+  
+  .loading-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+  }
 </style>
 </head>
 <body>
@@ -57,46 +95,6 @@
 
       <div class="row">
         <div>
-          <label>SVG size mode</label>
-          <select id="sizeMode">
-            <option>Match original (embedded)</option>
-            <option>Manual PPI</option>
-            <option>Manual physical size</option>
-          </select>
-        </div>
-        <div id="ppiBox">
-          <label id="ppiLabel">Image PPI</label>
-          <input id="ppi" type="number" min="50" max="1200" step="10" value="200" />
-        </div>
-      </div>
-
-      <div id="physBox" class="row" style="display:none">
-        <div>
-          <label>Units</label>
-          <select id="units">
-            <option>in</option>
-            <option>mm</option>
-          </select>
-        </div>
-        <div>
-          <label>Width</label>
-          <input id="physW" type="number" min="0.1" step="0.1" value="8" />
-        </div>
-        <div>
-          <label>Lock ratio <span class="badge" id="ratioBadge">on</span></label>
-          <select id="lockRatio">
-            <option>on</option>
-            <option>off</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="row">
-        <div>
-          <label>Stroke width (px)</label>
-          <input id="strokePx" type="number" min="0.1" step="0.1" value="0.6" />
-        </div>
-        <div>
           <label>Processing scale</label>
           <select id="procScale">
             <option>100%</option>
@@ -112,11 +110,11 @@
       <div class="row" id="hatchGlobal" style="margin-top:10px">
         <div>
           <label>Hatch angle (°)</label>
-          <input id="gAngle" type="number" min="0" max="179" step="1" value="23" />
+          <input id="gAngle" type="number" min="0" max="179" step="1" value="0" />
         </div>
         <div>
-          <label>Spacing (px)</label>
-          <input id="gSpacing" type="number" min="1" step="0.5" value="8" />
+          <label>Spacing (mm)</label>
+          <input id="gSpacing" type="number" min="0.1" step="0.1" value="2" />
         </div>
         <div>
           <label>Crosshatch</label>
@@ -163,14 +161,72 @@
     <div id="layers" class="layers"></div>
   </div>
 
-  <div class="panel hint">
-    Tips: If an SVG looks blank in Preview, increase Stroke width to ≥ 0.6 px. If it’s slow, use a smaller Processing scale and fewer colors.
+  <div class="panel" id="chartPanel" style="display: none;">
+    <h2 style="margin-top: 0;">K-Means Cluster Visualization</h2>
+    <div style="display: flex; gap: 20px; align-items: flex-start;">
+      <div>
+        <canvas id="clusterChart" width="400" height="400" style="border: 1px solid #ddd; border-radius: 8px;"></canvas>
+      </div>
+      <div style="flex: 1;">
+        <label>Chart Options</label>
+        <div style="margin-bottom: 10px;">
+          <input type="checkbox" id="showCentroids" checked>
+          <label for="showCentroids" style="display: inline; font-weight: normal;">Show centroids</label>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <input type="checkbox" id="showLabels" checked>
+          <label for="showLabels" style="display: inline; font-weight: normal;">Show cluster labels</label>
+        </div>
+        <div class="hint">Each point represents a color from your image, grouped by k-means clustering.</div>
+      </div>
+    </div>
   </div>
+
+  <div class="panel" id="threeDPanel" style="display: none;">
+    <h2 style="margin-top: 0;">3D RGB Space Visualization</h2>
+    <div style="display: flex; gap: 20px; align-items: flex-start;">
+      <div>
+        <div id="threeDContainer" style="width: 400px; height: 400px; border: 1px solid #ddd; border-radius: 8px;"></div>
+      </div>
+      <div style="flex: 1;">
+        <label>3D View Options</label>
+        <div style="margin-bottom: 10px;">
+          <input type="checkbox" id="showAxes" checked>
+          <label for="showAxes" style="display: inline; font-weight: normal;">Show RGB axes</label>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <input type="range" id="sampleDensity" min="1" max="100" value="10">
+          <label for="sampleDensity" style="display: inline; font-weight: normal;">Sample density: <span id="densityValue">10%</span></label>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <input type="checkbox" id="animateRotation" checked>
+          <label for="animateRotation" style="display: inline; font-weight: normal;">Animate rotation</label>
+        </div>
+        <div class="hint">3D visualization of RGB color space. Each box represents a sampled pixel color.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel hint">
+    Tips: If an SVG looks blank in Preview, increase Stroke width to ≥ 0.6 px. If it's slow, use a smaller Processing scale and fewer colors.
+  </div>
+</div>
+
+<!-- Loading overlay -->
+<div id="loadingContainer" class="loading-container">
+  <div class="loading-bar">
+    <div id="loadingProgress" class="loading-progress"></div>
+  </div>
+  <div id="loadingText" class="loading-text">Loading...</div>
 </div>
 
 <!-- Libraries for zipping -->
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
+<!-- Three.js for 3D visualization -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
 <script>
 // ---------- Helpers ----------
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -322,8 +378,374 @@ function svgFromSegments(segments, W, H, ppi, strokePx, borderPx){
   return parts.join("");
 }
 
+// ---------- PCA for 3D→2D projection ----------
+function pcaProjection(data) {
+  // Simple PCA implementation for RGB→2D projection
+  const n = data.length;
+  
+  // Center the data
+  const mean = [0, 0, 0];
+  data.forEach(v => {
+    mean[0] += v[0];
+    mean[1] += v[1];
+    mean[2] += v[2];
+  });
+  mean[0] /= n; mean[1] /= n; mean[2] /= n;
+  
+  const centered = data.map(v => [v[0] - mean[0], v[1] - mean[1], v[2] - mean[2]]);
+  
+  // Compute covariance matrix
+  const cov = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0]
+  ];
+  
+  centered.forEach(v => {
+    cov[0][0] += v[0] * v[0];
+    cov[0][1] += v[0] * v[1];
+    cov[0][2] += v[0] * v[2];
+    cov[1][0] += v[1] * v[0];
+    cov[1][1] += v[1] * v[1];
+    cov[1][2] += v[1] * v[2];
+    cov[2][0] += v[2] * v[0];
+    cov[2][1] += v[2] * v[1];
+    cov[2][2] += v[2] * v[2];
+  });
+  
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      cov[i][j] /= n;
+    }
+  }
+  
+  // Simple eigenvector approximation (first two principal components)
+  // For simplicity, we'll use the first two dimensions (R and G) as our projection
+  // This gives a reasonable 2D visualization of the color space
+  return data.map(v => [v[0] / 255, v[1] / 255]); // Normalize to 0-1 range
+}
+
+// ---------- Chart Visualization ----------
+function drawClusterChart(sampleData, labels, centers, k) {
+  const canvas = els('clusterChart');
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const padding = 40;
+  const chartWidth = width - 2 * padding;
+  const chartHeight = height - 2 * padding;
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height);
+  
+  // Project data to 2D
+  const projectedData = pcaProjection(sampleData);
+  
+  // Find data bounds
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  
+  projectedData.forEach(([x, y]) => {
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  });
+  
+  // Add some padding to bounds
+  const xRange = maxX - minX || 1;
+  const yRange = maxY - minY || 1;
+  minX -= xRange * 0.1;
+  maxX += xRange * 0.1;
+  minY -= yRange * 0.1;
+  maxY += yRange * 0.1;
+  
+  // Scale function
+  const scaleX = x => padding + ((x - minX) / (maxX - minX)) * chartWidth;
+  const scaleY = y => height - padding - ((y - minY) / (maxY - minY)) * chartHeight;
+  
+  // Draw grid
+  ctx.strokeStyle = '#eee';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i <= 1; i += 0.2) {
+    const x = scaleX(minX + i * (maxX - minX));
+    ctx.moveTo(x, padding);
+    ctx.lineTo(x, height - padding);
+    
+    const y = scaleY(minY + i * (maxY - minY));
+    ctx.moveTo(padding, y);
+    ctx.lineTo(width - padding, y);
+  }
+  ctx.stroke();
+  
+  // Draw axes
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(padding, padding);
+  ctx.lineTo(padding, height - padding);
+  ctx.lineTo(width - padding, height - padding);
+  ctx.stroke();
+  
+  // Draw points with actual cluster mean colors
+  projectedData.forEach((point, i) => {
+    const cluster = labels[i];
+    const [x, y] = point;
+    const rgb = centers[cluster];
+    
+    // Use the actual cluster color with some transparency
+    ctx.fillStyle = `rgba(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])}, 0.7)`;
+    ctx.beginPath();
+    ctx.arc(scaleX(x), scaleY(y), 4, 0, 2 * Math.PI);
+    ctx.fill();
+  });
+  
+  // Draw centroids if enabled
+  if (els('showCentroids').checked) {
+    const projectedCenters = pcaProjection(centers);
+    
+    projectedCenters.forEach((point, i) => {
+      const [x, y] = point;
+      const rgb = centers[i];
+      
+      // Draw centroid circle with actual cluster color
+      ctx.fillStyle = `rgb(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])})`;
+      ctx.beginPath();
+      ctx.arc(scaleX(x), scaleY(y), 8, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Add black border for better visibility
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // Draw cluster label if enabled
+      if (els('showLabels').checked) {
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 12px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Cluster ${i + 1}`, scaleX(x), scaleY(y) - 15);
+      }
+    });
+  }
+  
+  // Draw axis labels
+  ctx.fillStyle = '#666';
+  ctx.font = '12px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText('Red Component', width / 2, height - 10);
+  ctx.textAlign = 'right';
+  ctx.fillText('Green Component', 30, height / 2);
+}
+
+// ---------- 3D Visualization with Three.js ----------
+let scene, camera, renderer, controls;
+let animationId = null;
+
+function initThreeDScene() {
+  const container = els('threeDContainer');
+  
+  // Clear previous scene if it exists
+  if (renderer) {
+    container.innerHTML = '';
+    if (animationId) {
+      cancelAnimationFrame(animationId);
+      animationId = null;
+    }
+  }
+  
+  // Create scene
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf8f9fa);
+  
+  // Create camera
+  camera = new THREE.PerspectiveCamera(75, 400 / 400, 0.1, 1000);
+  camera.position.set(150, 150, 200);
+  
+  // Create renderer
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(400, 400);
+  container.appendChild(renderer.domElement);
+  
+  // Add orbit controls
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  
+  // Add ambient light
+  const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+  scene.add(ambientLight);
+  
+  // Add directional light
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  directionalLight.position.set(1, 1, 1);
+  scene.add(directionalLight);
+  
+  // Add RGB axes if enabled
+  if (els('showAxes').checked) {
+    addRGBaxes();
+  }
+}
+
+function addRGBaxes() {
+  // Remove existing axes if any
+  scene.children.filter(child => child.userData.isAxis).forEach(axis => scene.remove(axis));
+  
+  // Create RGB axes
+  const axes = [
+    { color: 0xff0000, direction: new THREE.Vector3(1, 0, 0), label: 'R' },
+    { color: 0x00ff00, direction: new THREE.Vector3(0, 1, 0), label: 'G' },
+    { color: 0x0000ff, direction: new THREE.Vector3(0, 0, 1), label: 'B' }
+  ];
+  
+  axes.forEach((axis, index) => {
+    // Axis line
+    const geometry = new THREE.BufferGeometry();
+    const vertices = new Float32Array([
+      0, 0, 0,
+      axis.direction.x * 110, axis.direction.y * 110, axis.direction.z * 110
+    ]);
+    geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    const material = new THREE.LineBasicMaterial({ color: axis.color });
+    const line = new THREE.Line(geometry, material);
+    line.userData.isAxis = true;
+    scene.add(line);
+  });
+}
+
+function createColorVisualization(sampleData, centers, density) {
+  // Clear existing visualization objects
+  scene.children.filter(child => child.userData.isVisualizationObject).forEach(obj => scene.remove(obj));
+  
+  const sampleCount = Math.max(1, Math.floor(sampleData.length * (density / 100)));
+  
+  // Use instancing for better performance with many pixels
+  const boxGeometry = new THREE.BoxGeometry(2, 2, 2);
+  const pixelMaterial = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.7
+  });
+  
+  // Create instanced mesh for pixels
+  const pixelMesh = new THREE.InstancedMesh(boxGeometry, pixelMaterial, sampleCount);
+  pixelMesh.userData.isVisualizationObject = true;
+  pixelMesh.userData.type = 'pixels';
+  
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  
+  for (let i = 0; i < sampleCount; i++) {
+    const rgb = sampleData[i];
+    const [r, g, b] = rgb;
+    
+    // Set position (centered around 127.5, 127.5, 127.5)
+    dummy.position.set(r - 127.5, g - 127.5, b - 127.5);
+    dummy.updateMatrix();
+    pixelMesh.setMatrixAt(i, dummy.matrix);
+    
+    // Set color
+    color.setRGB(r / 255, g / 255, b / 255);
+    pixelMesh.setColorAt(i, color);
+  }
+  
+  pixelMesh.instanceMatrix.needsUpdate = true;
+  if (pixelMesh.instanceColor) pixelMesh.instanceColor.needsUpdate = true;
+  scene.add(pixelMesh);
+  
+  // Create spheres for k-means centroids (not instanced since there are only a few)
+  if (centers && centers.length > 0) {
+    const sphereGeometry = new THREE.SphereGeometry(10, 16, 16); // Increased sphere size
+    
+    centers.forEach((rgb, index) => {
+      const [r, g, b] = rgb;
+      
+      // Create material for centroid sphere (no shadows)
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(r / 255, g / 255, b / 255),
+        transparent: true,
+        opacity: 1.0
+      });
+      
+      // Create sphere for centroid
+      const sphere = new THREE.Mesh(sphereGeometry, material);
+      sphere.userData.isVisualizationObject = true;
+      sphere.userData.type = 'centroid';
+      
+      // Position in RGB space (centered around 127.5, 127.5, 127.5)
+      sphere.position.set(r - 127.5, g - 127.5, b - 127.5);
+      
+      scene.add(sphere);
+    });
+  }
+  
+  // Create a cube around the entire color space (0-255 range)
+  const cubeSize = 255;
+  const cubeGeometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+  const cubeMaterial = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.3
+  });
+  
+  const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+  cube.userData.isVisualizationObject = true;
+  cube.userData.type = 'boundingCube';
+  cube.position.set(-127.5, -127.5, -127.5); // Center the cube
+  scene.add(cube);
+}
+
+function animate() {
+  animationId = requestAnimationFrame(animate);
+  
+  if (els('animateRotation').checked) {
+    scene.rotation.y += 0.005;
+  }
+  
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function update3DVisualization(sampleData, centers) {
+  const density = parseInt(els('sampleDensity').value);
+  els('densityValue').textContent = `${density}%`;
+  
+  initThreeDScene();
+  createColorVisualization(sampleData, centers, density);
+  animate();
+}
+
+// Event listeners for 3D controls
+els('showAxes').addEventListener('change', () => {
+  if (els('showAxes').checked) {
+    addRGBaxes();
+  } else {
+    scene.children.filter(child => child.userData.isAxis).forEach(axis => scene.remove(axis));
+  }
+});
+
+els('sampleDensity').addEventListener('input', () => {
+  if (sampleDataFor3D && centers) {
+    const density = parseInt(els('sampleDensity').value);
+    els('densityValue').textContent = `${density}%`;
+    createColorVisualization(sampleDataFor3D, centers, density);
+  }
+});
+
+els('animateRotation').addEventListener('change', () => {
+  if (!els('animateRotation').checked && animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = null;
+  } else if (els('animateRotation').checked && !animationId && renderer) {
+    animate();
+  }
+});
+
 // ---------- State ----------
 let img=null, W=0, H=0, pixels=null, fileObj=null, detectedPPI=null, labelMap=null, centers=null, sourceBase='image';
+let sampleDataFor3D = null;
 
 const fileEl = els('file');
 fileEl.addEventListener('change', async (e)=>{
@@ -334,47 +756,27 @@ fileEl.addEventListener('change', async (e)=>{
   detectedPPI = await detectPPI(f);
   const url = URL.createObjectURL(f);
   const im = new Image();
-  im.onload = ()=>{
+    im.onload = ()=>{
     img = im; W=im.naturalWidth; H=im.naturalHeight;
     els('preview').src = url;
     const cvs=document.createElement('canvas'); cvs.width=W; cvs.height=H;
     const ctx=cvs.getContext('2d'); ctx.drawImage(im,0,0);
     pixels = ctx.getImageData(0,0,W,H).data; // RGBA
     updateSizeUI();
-    els('imgMeta').textContent = `${W}×${H}px` + (detectedPPI? ` • embedded ~${detectedPPI.toFixed(2)} PPI` : '');
   };
   im.src=url;
 });
 
 function updateSizeUI(){
-  const mode = els('sizeMode').value;
-  const ppiBox = els('ppiBox');
-  const physBox = els('physBox');
-  if(mode==='Match original (embedded)'){
-    ppiBox.style.display='block';
-    els('ppiLabel').textContent = detectedPPI? 'Detected PPI' : 'PPI (no embedded DPI found)';
-    els('ppi').value = detectedPPI? Math.round(detectedPPI) : 200;
-    physBox.style.display='none';
-  } else if(mode==='Manual PPI'){
-    ppiBox.style.display='block'; els('ppiLabel').textContent='Image PPI'; physBox.style.display='none';
-  } else {
-    ppiBox.style.display='none'; physBox.style.display='flex';
-    const basePPI = detectedPPI || 200; const wIn = W/basePPI; const wMM=wIn*25.4;
-    if(els('units').value==='in'){ els('physW').value = wIn.toFixed(3); } else { els('physW').value = wMM.toFixed(1); }
-  }
   setExportInfo();
+  updateImageMetadata(detectedPPI);
 }
-['sizeMode','units','physW','lockRatio','ppi','borderOn','borderSize','borderUnits'].forEach(id=>{
+['borderOn','borderSize','borderUnits'].forEach(id=>{
   els(id).addEventListener('change',()=>{ if(!img) return; updateSizeUI(); });
 });
 
 function computeUsedPPI(){
-  const mode = els('sizeMode').value;
-  if(mode==='Match original (embedded)') return Number(els('ppi').value);
-  if(mode==='Manual PPI') return Number(els('ppi').value);
-  const units = els('units').value; const Wval = Number(els('physW').value);
-  const widthIn = (units==='in')? Wval : (Wval/25.4);
-  return W/widthIn;
+  return detectedPPI;
 }
 
 function getBorderPx(ppi){
@@ -393,13 +795,46 @@ function setExportInfo(){
   els('exportInfo').textContent = `SVG export size ≈ ${wIn.toFixed(3)} in × ${hIn.toFixed(3)} in @ ${ppi.toFixed(2)} PPI${b>0? ' (includes blank border)':''}.`;
 }
 
+// Update image metadata display with simplified format
+function updateImageMetadata(ppi){
+  if(!img) return;
+  
+  const currentPPI = ppi || computeUsedPPI();
+  const widthIn = W / currentPPI;
+  const heightIn = H / currentPPI;
+  
+  let metadataText = `Artwork Size: ${widthIn.toFixed(1)}" × ${heightIn.toFixed(1)}" (${currentPPI.toFixed(0)} DPI)`;
+  
+  els('imgMeta').textContent = metadataText;
+}
+
+// Loading functions
+function showLoading(text, progress) {
+  els('loadingContainer').style.display = 'flex';
+  els('loadingText').textContent = text;
+  els('loadingProgress').style.width = `${progress}%`;
+}
+
+function hideLoading() {
+  els('loadingContainer').style.display = 'none';
+}
+
 // Analyze & build layers
-els('analyze').addEventListener('click', ()=>{
+els('analyze').addEventListener('click', async ()=>{
   if(!fileObj){ els('err').textContent = 'Please select a PNG or JPEG first.'; return; }
   els('err').textContent='';
   if(!img) return;
+  
+  // Show loading
+  showLoading('Sampling image colors...', 10);
+  
   const invert = els('invert').value==='1';
   const total = W*H; const maxSample = Math.min(total, 200000);
+  
+  // Use setTimeout to allow UI to update
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
+  showLoading('Sampling image colors...', 30);
   const idxs = arrayShufflePick([...Array(total).keys()], maxSample);
   const sample = idxs.map(i=>[pixels[i*4], pixels[i*4+1], pixels[i*4+2]]);
 
@@ -411,8 +846,15 @@ els('analyze').addEventListener('click', ()=>{
     k = clamp(est,2,12);
   } else { k = clamp(kRaw,2,12); }
 
+  showLoading('Running K-Means clustering...', 50);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
   const {centers:c, labels} = kmeans(sample, k, 8);
   centers = c.map(v=>[v[0],v[1],v[2]]);
+  
+  showLoading('Assigning labels to pixels...', 70);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
   labelMap = new Uint8Array(total);
   function d2(a,b){ const dr=a[0]-b[0],dg=a[1]-b[1],db=a[2]-b[2]; return dr*dr+dg*dg+db*db; }
   for(let i=0;i<total;i++){
@@ -425,6 +867,9 @@ els('analyze').addEventListener('click', ()=>{
   centers = br.map(([_,i])=>centers[i]);
   const remap = new Uint8Array(k); br.forEach(([,i],j)=>remap[i]=j);
   for(let i=0;i<total;i++) labelMap[i]=remap[labelMap[i]];
+
+  showLoading('Building UI components...', 90);
+  await new Promise(resolve => setTimeout(resolve, 50));
 
   // UI
   const sw = els('swatches'); sw.innerHTML='';
@@ -451,6 +896,27 @@ els('analyze').addEventListener('click', ()=>{
   const zipBtn = els('downloadAll');
   zipBtn.style.display='inline-block';
   zipBtn.disabled=false;
+
+  // Show and draw the cluster chart
+  els('chartPanel').style.display = 'block';
+  drawClusterChart(sample, labels, centers, k);
+  
+  // Add event listeners for chart options
+  els('showCentroids').addEventListener('change', () => {
+    drawClusterChart(sample, labels, centers, k);
+  });
+  els('showLabels').addEventListener('change', () => {
+    drawClusterChart(sample, labels, centers, k);
+  });
+
+  // Show and update 3D visualization
+  els('threeDPanel').style.display = 'block';
+  sampleDataFor3D = sample;
+  update3DVisualization(sample, centers);
+
+  showLoading('Finalizing...', 100);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  hideLoading();
 });
 
 function buildMaskForLabel(lbl, invert){
@@ -462,18 +928,18 @@ function buildMaskForLabel(lbl, invert){
 
 async function downloadOne(idx, dEl){
   const invert = els('invert').value==='1';
-  const strokePx = Number(els('strokePx').value);
   const ppi = computeUsedPPI();
   const angle = Number(els('gAngle').value);
-  const spacing = Number(els('gSpacing').value);
+  const spacingMM = Number(els('gSpacing').value);
+  const spacingPx = (spacingMM / 25.4) * ppi; // Convert mm to pixels
   const xh = els('gCross').value==='Yes';
   const xha = Number(els('gCrossAngle').value);
 
   const mask = buildMaskForLabel(idx, invert);
-  const segA = buildHatchSegments(mask, W, H, angle, spacing);
-  const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacing)) : segA;
+  const segA = buildHatchSegments(mask, W, H, angle, spacingPx);
+  const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacingPx)) : segA;
   const bpx = getBorderPx(ppi);
-  const svg = svgFromSegments(segs, W, H, ppi, strokePx, bpx);
+  const svg = svgFromSegments(segs, W, H, ppi, 0.6, bpx); // Fixed stroke width of 0.6px
   const name = `${sourceBase}--layer-${String(idx+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[idx]))}.svg`;
   const blob = new Blob([svg], {type:'image/svg+xml'});
   saveAs(blob, name);
@@ -483,10 +949,10 @@ async function downloadOne(idx, dEl){
 
 els('downloadAll').addEventListener('click', async ()=>{
   const invert = els('invert').value==='1';
-  const strokePx = Number(els('strokePx').value);
   const ppi = computeUsedPPI();
   const angle = Number(els('gAngle').value);
-  const spacing = Number(els('gSpacing').value);
+  const spacingMM = Number(els('gSpacing').value);
+  const spacingPx = (spacingMM / 25.4) * ppi; // Convert mm to pixels
   const xh = els('gCross').value==='Yes';
   const xha = Number(els('gCrossAngle').value);
   const bpx = getBorderPx(ppi);
@@ -494,9 +960,9 @@ els('downloadAll').addEventListener('click', async ()=>{
   const zip = new JSZip();
   for(let i=0;i<centers.length;i++){
     const mask = buildMaskForLabel(i, invert);
-    const segA = buildHatchSegments(mask, W, H, angle, spacing);
-    const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacing)) : segA;
-    const svg = svgFromSegments(segs, W, H, ppi, strokePx, bpx);
+    const segA = buildHatchSegments(mask, W, H, angle, spacingPx);
+    const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacingPx)) : segA;
+    const svg = svgFromSegments(segs, W, H, ppi, 0.6, bpx); // Fixed stroke width of 0.6px
     const name = `${sourceBase}--layer-${String(i+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[i]))}.svg`;
     zip.file(name, svg);
   }

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plotta Dotta — Web</title>
+<style>
+  :root { --fg:#0b0b0b; --muted:#666; --bg:#fafafa; --card:#ffffff; }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji","Segoe UI Emoji"}
+  .wrap{max-width:980px;margin:24px auto;padding:0 16px}
+  h1{font-size:22px;margin:0 0 6px}
+  .caption{color:var(--muted);margin-bottom:16px}
+  .panel{background:var(--card);border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.05);padding:14px;margin-bottom:14px}
+  .grid{display:grid;gap:12px}
+  .grid.cols-2{grid-template-columns:1.2fr .8fr}
+  label{display:block;font-weight:600;margin:6px 0 4px}
+  input[type="number"], select{width:100%;padding:8px;border:1px solid #ddd;border-radius:10px;box-sizing:border-box}
+  input[type="range"]{width:100%}
+  .row{display:flex;gap:10px;align-items:center}
+  .row>div{flex:1}
+  button{appearance:none;background:#111;color:#fff;border:0;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}
+  button.secondary{background:#eaeaea;color:#111}
+  .swatches{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+  .sw{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.25)}
+  .layers{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+  .layer{border:1px solid #eee;border-radius:12px;padding:10px}
+  .hint{color:var(--muted);font-size:12px}
+  .error{color:#b00020}
+  .preview{max-width:640px;width:100%;border-radius:12px;border:1px solid #eee}
+  .badge{display:inline-block;background:#efefef;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Plotta Dotta — Web</h1>
+  <div class="caption">Dithered image → hatched SVG layers. Strokes are black by default.</div>
+
+  <div class="panel grid cols-2">
+    <div>
+      <label>Upload PNG/JPEG</label>
+      <input id="file" type="file" accept="image/png,image/jpeg" />
+      <div id="imgMeta" class="hint" style="margin-top:6px"></div>
+
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>Target colors (K‑Means) <span class="hint">(set <b>0</b> for Auto)</span></label>
+          <input id="k" type="number" min="0" max="12" step="1" value="6" />
+        </div>
+        <div>
+          <label>Invert masks</label>
+          <select id="invert" title="Treat light areas as plotted when set to Yes (useful if your source uses white-as-ink).">
+            <option value="0">No</option>
+            <option value="1">Yes</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>SVG size mode</label>
+          <select id="sizeMode">
+            <option>Match original (embedded)</option>
+            <option>Manual PPI</option>
+            <option>Manual physical size</option>
+          </select>
+        </div>
+        <div id="ppiBox">
+          <label id="ppiLabel">Image PPI</label>
+          <input id="ppi" type="number" min="50" max="1200" step="10" value="200" />
+        </div>
+      </div>
+
+      <div id="physBox" class="row" style="display:none">
+        <div>
+          <label>Units</label>
+          <select id="units">
+            <option>in</option>
+            <option>mm</option>
+          </select>
+        </div>
+        <div>
+          <label>Width</label>
+          <input id="physW" type="number" min="0.1" step="0.1" value="8" />
+        </div>
+        <div>
+          <label>Lock ratio <span class="badge" id="ratioBadge">on</span></label>
+          <select id="lockRatio">
+            <option>on</option>
+            <option>off</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Stroke width (px)</label>
+          <input id="strokePx" type="number" min="0.1" step="0.1" value="0.6" />
+        </div>
+        <div>
+          <label>Processing scale</label>
+          <select id="procScale">
+            <option>100%</option>
+            <option>75%</option>
+            <option>50%</option>
+            <option>33%</option>
+            <option>25%</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Global hatch controls -->
+      <div class="row" id="hatchGlobal" style="margin-top:10px">
+        <div>
+          <label>Hatch angle (°)</label>
+          <input id="gAngle" type="number" min="0" max="179" step="1" value="23" />
+        </div>
+        <div>
+          <label>Spacing (px)</label>
+          <input id="gSpacing" type="number" min="1" step="0.5" value="8" />
+        </div>
+        <div>
+          <label>Crosshatch</label>
+          <select id="gCross"><option>No</option><option>Yes</option></select>
+        </div>
+        <div>
+          <label>Cross angle (°)</label>
+          <input id="gCrossAngle" type="number" min="0" max="179" step="1" value="90" />
+        </div>
+      </div>
+
+      <!-- Blank border controls -->
+      <div class="row" id="borderRow" style="margin-top:10px">
+        <div>
+          <label>Blank border</label>
+          <select id="borderOn"><option selected>Yes</option><option>No</option></select>
+        </div>
+        <div>
+          <label>Border size</label>
+          <input id="borderSize" type="number" min="0" step="0.1" value="1" />
+        </div>
+        <div>
+          <label>Units</label>
+          <select id="borderUnits"><option selected>in</option><option>mm</option></select>
+        </div>
+      </div>
+
+      <div id="exportInfo" class="hint" style="margin-top:6px"></div>
+
+      <div class="row" style="margin-top:10px">
+        <button id="analyze">Analyze & Build Layers</button>
+        <button id="downloadAll" class="secondary" style="display:none" disabled>Download All (ZIP)</button>
+      </div>
+      <div id="err" class="hint error" style="margin-top:6px"></div>
+    </div>
+
+    <div>
+      <img id="preview" class="preview" alt="preview" />
+    </div>
+  </div>
+
+  <div class="panel">
+    <div id="swatches" class="swatches"></div>
+    <div id="layers" class="layers"></div>
+  </div>
+
+  <div class="panel hint">
+    Tips: If an SVG looks blank in Preview, increase Stroke width to ≥ 0.6 px. If it’s slow, use a smaller Processing scale and fewer colors.
+  </div>
+</div>
+
+<!-- Libraries for zipping -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script>
+// ---------- Helpers ----------
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const els = id => document.getElementById(id);
+
+// Filename helpers
+function sanitizeStem(stem){
+  let s = (stem||'').trim().replace(/\s+/g,'_');
+  s = s.replace(/[^A-Za-z0-9._-]+/g,'-');
+  s = s.replace(/-+/g,'-');
+  s = s.replace(/^[\-.]+|[\-.]+$/g,'');
+  return s || 'image';
+}
+function makeSlug(name){
+  let s = (name||'').toLowerCase().trim().replace(/\s+/g,'-');
+  s = s.replace(/[^a-z0-9._-]+/g,'-');
+  s = s.replace(/-+/g,'-');
+  s = s.replace(/^[\-.]+|[\-.]+$/g,'');
+  return s || 'layer';
+}
+
+function arrayShufflePick(arr, max) { // pick up to max random items
+  const a = arr.slice();
+  for (let i=a.length-1;i>0;i--){const j=(Math.random()* (i+1))|0; [a[i],a[j]]=[a[j],a[i]]}
+  return a.slice(0, max);
+}
+
+function rgb2name([r,g,b]){
+  r/=255; g/=255; b/=255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b); const v=mx; const d=mx-mn; const s= mx===0?0:d/mx;
+  let h=0; if(d!==0){ if(mx===r) h=((g-b)/d)%6; else if(mx===g) h=(b-r)/d+2; else h=(r-g)/d+4; h*=60; if(h<0) h+=360; }
+  if(v<0.2) return 'black'; if(s<0.1){ if(v<0.35) return 'dark gray'; if(v<0.7) return 'gray'; if(v<0.92) return 'light gray'; return 'white'; }
+  let base = (h<15||h>=345)?'red': (h<45)?'orange': (h<70)?'yellow': (h<165)?'green': (h<200)?'cyan': (h<255)?'blue': (h<290)?'purple':'magenta';
+  const adj = v<0.35?'dark ': v>0.8?'light ':''; return (adj+base).trim();
+}
+
+// ---------- Read embedded DPI ----------
+async function detectPPI(file){
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  // PNG pHYs
+  const isPNG = bytes[0]==0x89 && bytes[1]==0x50 && bytes[2]==0x4E && bytes[3]==0x47;
+  if(isPNG){
+    // scan chunks
+    let p=8; // skip signature
+    while(p+8 < bytes.length){
+      const len = (bytes[p]<<24)|(bytes[p+1]<<16)|(bytes[p+2]<<8)|bytes[p+3];
+      const type = String.fromCharCode(bytes[p+4],bytes[p+5],bytes[p+6],bytes[p+7]);
+      if(type==='pHYs' && len>=9){
+        const xppm = (bytes[p+8]<<24)|(bytes[p+9]<<16)|(bytes[p+10]<<8)|bytes[p+11];
+        const unit = bytes[p+16]; // 1=meters
+        if(unit===1){ const ppi = ((xppm>>>0) * 0.0254); return clamp(ppi,50,1200); }
+      }
+      p += 12 + len; // 4 len + 4 type + len + 4 crc
+    }
+  }
+  // JPEG JFIF/EXIF
+  const isJPG = bytes[0]==0xFF && bytes[1]==0xD8;
+  if(isJPG){
+    let p=2;
+    while(p+4<bytes.length){
+      if(bytes[p]!=0xFF) break; const marker = bytes[p+1]; const size = (bytes[p+2]<<8)|bytes[p+3];
+      if(marker==0xE0 && size>=16){ // APP0 JFIF
+        const id = String.fromCharCode(bytes[p+4],bytes[p+5],bytes[p+6],bytes[p+7],bytes[p+8]);
+        if(id.startsWith('JFIF')){
+          const units = bytes[p+9]; const xden = (bytes[p+10]<<8)|bytes[p+11]; const yden = (bytes[p+12]<<8)|bytes[p+13];
+          if(units==1){ return clamp((xden+yden)/2,50,1200); }
+          if(units==2){ return clamp(((xden+yden)/2)*2.54,50,1200); }
+        }
+      }
+      // APP1 EXIF would need TIFF parsing; skipping for brevity
+      if(marker==0xDA) break; // SOS
+      p += 2 + size;
+    }
+  }
+  return null;
+}
+
+// ---------- KMeans (simple) ----------
+function kmeans(data, k, iters=8) {
+  // data: array of [r,g,b]
+  const n = data.length;
+  const centers = [];
+  const used = new Set();
+  for(let i=0;i<k;i++){ let idx; do{ idx=(Math.random()*n)|0; }while(used.has(idx)); used.add(idx); centers.push(data[idx].slice()); }
+  const labels = new Array(n).fill(0);
+  const dist2=(a,b)=>{ const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2]; return dr*dr+dg*dg+db*db; };
+  for(let t=0;t<iters;t++){
+    // assign
+    for(let i=0;i<n;i++){
+      let best=0, bd=Infinity; const v=data[i];
+      for(let c=0;c<k;c++){ const d=dist2(v,centers[c]); if(d<bd){bd=d; best=c;} }
+      labels[i]=best;
+    }
+    // update
+    const acc = Array.from({length:k},()=>[0,0,0,0]);
+    for(let i=0;i<n;i++){ const l=labels[i]; const v=data[i]; acc[l][0]+=v[0]; acc[l][1]+=v[1]; acc[l][2]+=v[2]; acc[l][3]++; }
+    for(let c=0;c<k;c++){ if(acc[c][3]>0){ centers[c][0]=acc[c][0]/acc[c][3]; centers[c][1]=acc[c][1]/acc[c][3]; centers[c][2]=acc[c][2]/acc[c][3]; } }
+  }
+  return {centers, labels};
+}
+
+// ---------- Hatching ----------
+function buildHatchSegments(mask, W, H, angleDeg, spacing){
+  // mask: Uint8Array (0/1) length W*H
+  const rad = angleDeg * Math.PI/180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const nx = -sin, ny = cos; // normal vector
+  // project bbox corners onto normal to get range of c
+  const corners=[[0,0],[W,0],[0,H],[W,H]];
+  let cmin=Infinity, cmax=-Infinity;
+  for(const [x,y] of corners){ const c = nx*x + ny*y; if(c<cmin) cmin=c; if(c>cmax) cmax=c; }
+  const pad = spacing*2; cmin-=pad; cmax+=pad;
+  const segments = [];
+  for(let c=cmin; c<=cmax; c+=spacing){
+    // parametric line: n·p = c; direction along tangent t=(cos,sin)
+    const L = Math.hypot(W,H) + 2*pad; // span length
+    // Find a point on the line near center
+    const cx=W/2, cy=H/2; const dc = nx*cx + ny*cy; const shift = c - dc;
+    const x0 = cx + nx*shift; const y0 = cy + ny*shift;
+    // March along tangent both directions in steps ~1px
+    const step = 1; // px
+    let prevInside=false, runStart=null;
+    for(let s=-L/2; s<=L/2; s+=step){
+      const x = x0 + cos*s, y = y0 + sin*s;
+      const xi = Math.round(x), yi = Math.round(y);
+      const inside = (xi>=0 && yi>=0 && xi<W && yi<H) && (mask[yi*W+xi]===1);
+      if(inside && !prevInside){ runStart = [x,y]; }
+      if(!inside && prevInside && runStart){ segments.push([runStart, [x,y]]); runStart=null; }
+      prevInside = inside;
+    }
+    if(prevInside && runStart){ segments.push([runStart, [x0 + cos*(L/2), y0 + sin*(L/2)]]); }
+  }
+  return segments;
+}
+
+function svgFromSegments(segments, W, H, ppi, strokePx, borderPx){
+  const totalWpx = W + 2*(borderPx||0);
+  const totalHpx = H + 2*(borderPx||0);
+  const widthMM = (totalWpx/ppi)*25.4, heightMM=(totalHpx/ppi)*25.4;
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${widthMM.toFixed(3)}mm" height="${heightMM.toFixed(3)}mm" viewBox="0 0 ${totalWpx} ${totalHpx}">`];
+  if(borderPx>0){ parts.push(`<g transform="translate(${borderPx.toFixed(2)},${borderPx.toFixed(2)})">`); }
+  for(const seg of segments){
+    const [[x1,y1],[x2,y2]] = seg;
+    parts.push(`<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="#000" stroke-width="${strokePx}" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`);
+  }
+  if(borderPx>0){ parts.push(`</g>`); }
+  parts.push(`</svg>`);
+  return parts.join("");
+}
+
+// ---------- State ----------
+let img=null, W=0, H=0, pixels=null, fileObj=null, detectedPPI=null, labelMap=null, centers=null, sourceBase='image';
+
+const fileEl = els('file');
+fileEl.addEventListener('change', async (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  fileObj=f;
+  // derive source base name from uploaded file
+  sourceBase = sanitizeStem(f.name.replace(/\.[^.]+$/, ""));
+  detectedPPI = await detectPPI(f);
+  const url = URL.createObjectURL(f);
+  const im = new Image();
+  im.onload = ()=>{
+    img = im; W=im.naturalWidth; H=im.naturalHeight;
+    els('preview').src = url;
+    const cvs=document.createElement('canvas'); cvs.width=W; cvs.height=H;
+    const ctx=cvs.getContext('2d'); ctx.drawImage(im,0,0);
+    pixels = ctx.getImageData(0,0,W,H).data; // RGBA
+    updateSizeUI();
+    els('imgMeta').textContent = `${W}×${H}px` + (detectedPPI? ` • embedded ~${detectedPPI.toFixed(2)} PPI` : '');
+  };
+  im.src=url;
+});
+
+function updateSizeUI(){
+  const mode = els('sizeMode').value;
+  const ppiBox = els('ppiBox');
+  const physBox = els('physBox');
+  if(mode==='Match original (embedded)'){
+    ppiBox.style.display='block';
+    els('ppiLabel').textContent = detectedPPI? 'Detected PPI' : 'PPI (no embedded DPI found)';
+    els('ppi').value = detectedPPI? Math.round(detectedPPI) : 200;
+    physBox.style.display='none';
+  } else if(mode==='Manual PPI'){
+    ppiBox.style.display='block'; els('ppiLabel').textContent='Image PPI'; physBox.style.display='none';
+  } else {
+    ppiBox.style.display='none'; physBox.style.display='flex';
+    const basePPI = detectedPPI || 200; const wIn = W/basePPI; const wMM=wIn*25.4;
+    if(els('units').value==='in'){ els('physW').value = wIn.toFixed(3); } else { els('physW').value = wMM.toFixed(1); }
+  }
+  setExportInfo();
+}
+['sizeMode','units','physW','lockRatio','ppi','borderOn','borderSize','borderUnits'].forEach(id=>{
+  els(id).addEventListener('change',()=>{ if(!img) return; updateSizeUI(); });
+});
+
+function computeUsedPPI(){
+  const mode = els('sizeMode').value;
+  if(mode==='Match original (embedded)') return Number(els('ppi').value);
+  if(mode==='Manual PPI') return Number(els('ppi').value);
+  const units = els('units').value; const Wval = Number(els('physW').value);
+  const widthIn = (units==='in')? Wval : (Wval/25.4);
+  return W/widthIn;
+}
+
+function getBorderPx(ppi){
+  if(els('borderOn').value==='No') return 0;
+  const v = Number(els('borderSize').value)||0;
+  const u = els('borderUnits').value;
+  if(u==='in') return v*ppi;
+  if(u==='mm') return (v/25.4)*ppi;
+  return 0;
+}
+
+function setExportInfo(){
+  const ppi=computeUsedPPI();
+  const b = getBorderPx(ppi);
+  const wIn=(W + 2*b)/ppi, hIn=(H + 2*b)/ppi;
+  els('exportInfo').textContent = `SVG export size ≈ ${wIn.toFixed(3)} in × ${hIn.toFixed(3)} in @ ${ppi.toFixed(2)} PPI${b>0? ' (includes blank border)':''}.`;
+}
+
+// Analyze & build layers
+els('analyze').addEventListener('click', ()=>{
+  if(!fileObj){ els('err').textContent = 'Please select a PNG or JPEG first.'; return; }
+  els('err').textContent='';
+  if(!img) return;
+  const invert = els('invert').value==='1';
+  const total = W*H; const maxSample = Math.min(total, 200000);
+  const idxs = arrayShufflePick([...Array(total).keys()], maxSample);
+  const sample = idxs.map(i=>[pixels[i*4], pixels[i*4+1], pixels[i*4+2]]);
+
+  // Auto K if 0
+  let kRaw = Number(els('k').value)|0; let k;
+  if(kRaw<=0){
+    const uniq = new Set(sample.map(v=> (v[0]<<16)|(v[1]<<8)|v[2] ));
+    const est = Math.round(Math.sqrt(uniq.size));
+    k = clamp(est,2,12);
+  } else { k = clamp(kRaw,2,12); }
+
+  const {centers:c, labels} = kmeans(sample, k, 8);
+  centers = c.map(v=>[v[0],v[1],v[2]]);
+  labelMap = new Uint8Array(total);
+  function d2(a,b){ const dr=a[0]-b[0],dg=a[1]-b[1],db=a[2]-b[2]; return dr*dr+dg*dg+db*db; }
+  for(let i=0;i<total;i++){
+    const v=[pixels[i*4],pixels[i*4+1],pixels[i*4+2]]; let best=0,bd=Infinity;
+    for(let cIdx=0;cIdx<k;cIdx++){ const dd=d2(v,centers[cIdx]); if(dd<bd){bd=dd; best=cIdx;} }
+    labelMap[i]=best;
+  }
+  // order centers by brightness (darkest first)
+  const br = centers.map((v,i)=>[ (v[0]+v[1]+v[2])/3, i ]).sort((a,b)=>a[0]-b[0]);
+  centers = br.map(([_,i])=>centers[i]);
+  const remap = new Uint8Array(k); br.forEach(([,i],j)=>remap[i]=j);
+  for(let i=0;i<total;i++) labelMap[i]=remap[labelMap[i]];
+
+  // UI
+  const sw = els('swatches'); sw.innerHTML='';
+  centers.forEach(rgb=>{
+    const s=document.createElement('div'); s.className='sw'; s.style.background=`rgb(${rgb.map(x=>x|0).join(',')})`;
+    s.title = rgb2name(rgb);
+    sw.appendChild(s);
+  });
+
+  const layers = els('layers'); layers.innerHTML='';
+  centers.forEach((rgb, i)=>{
+    const d=document.createElement('div'); d.className='layer';
+    d.innerHTML = `
+      <div style=\"font-weight:700; margin-bottom:6px;\">Layer ${i+1}: ${rgb2name(rgb)}</div>
+      <div class=\"row\" style=\"margin-top:10px\">\n        <button class=\"dl\">Download SVG</button>\n      </div>
+      <div class=\"hint\" style=\"margin-top:6px\" data-hint></div>
+    `;
+    layers.appendChild(d);
+
+    const btn = d.querySelector('.dl');
+    btn.addEventListener('click', ()=> downloadOne(i, d));
+  });
+
+  const zipBtn = els('downloadAll');
+  zipBtn.style.display='inline-block';
+  zipBtn.disabled=false;
+});
+
+function buildMaskForLabel(lbl, invert){
+  const m = new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++){ m[i] = (labelMap[i]===lbl) ? 1 : 0; }
+  if(invert){ for(let i=0;i<W*H;i++) m[i]=m[i]?0:1; }
+  return m;
+}
+
+async function downloadOne(idx, dEl){
+  const invert = els('invert').value==='1';
+  const strokePx = Number(els('strokePx').value);
+  const ppi = computeUsedPPI();
+  const angle = Number(els('gAngle').value);
+  const spacing = Number(els('gSpacing').value);
+  const xh = els('gCross').value==='Yes';
+  const xha = Number(els('gCrossAngle').value);
+
+  const mask = buildMaskForLabel(idx, invert);
+  const segA = buildHatchSegments(mask, W, H, angle, spacing);
+  const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacing)) : segA;
+  const bpx = getBorderPx(ppi);
+  const svg = svgFromSegments(segs, W, H, ppi, strokePx, bpx);
+  const name = `${sourceBase}--layer-${String(idx+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[idx]))}.svg`;
+  const blob = new Blob([svg], {type:'image/svg+xml'});
+  saveAs(blob, name);
+  const hint = dEl.querySelector('[data-hint]');
+  hint.textContent = `Exported ${name}`;
+}
+
+els('downloadAll').addEventListener('click', async ()=>{
+  const invert = els('invert').value==='1';
+  const strokePx = Number(els('strokePx').value);
+  const ppi = computeUsedPPI();
+  const angle = Number(els('gAngle').value);
+  const spacing = Number(els('gSpacing').value);
+  const xh = els('gCross').value==='Yes';
+  const xha = Number(els('gCrossAngle').value);
+  const bpx = getBorderPx(ppi);
+  if(!centers){ return; }
+  const zip = new JSZip();
+  for(let i=0;i<centers.length;i++){
+    const mask = buildMaskForLabel(i, invert);
+    const segA = buildHatchSegments(mask, W, H, angle, spacing);
+    const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacing)) : segA;
+    const svg = svgFromSegments(segs, W, H, ppi, strokePx, bpx);
+    const name = `${sourceBase}--layer-${String(i+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[i]))}.svg`;
+    zip.file(name, svg);
+  }
+  const blob = await zip.generateAsync({type:'blob'});
+  saveAs(blob, `${sourceBase}--layers.zip`);
+});
+</script>
+</body>
+</html>

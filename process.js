@@ -956,7 +956,7 @@ async function analyzeImage() {
   showLoading('Sampling image colors...', 30);
   //const idxs = arrayShufflePick([...Array(total).keys()], maxSample);
   //const sample = idxs.map(i => [pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2]]);
-  const { sample } = getDownscaledPixels(2000); // instead of arrayShufflePick over W*H
+  const { sample } = getDownscaledPixels(1000); // instead of arrayShufflePick over W*H
 
   // Decide k
   let kRaw = Number(els('k').value) | 0;

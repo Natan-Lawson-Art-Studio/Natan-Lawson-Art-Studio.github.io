@@ -1,6 +1,8 @@
 // ---------- Helpers ----------
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const els = id => document.getElementById(id);
+let layersVisible = [];        // boolean flags per layer
+let segCache = new Map();      // cache segments per layer + settings to avoid recompute
 
 // Filename helpers
 function sanitizeStem(stem){
@@ -17,6 +19,29 @@ function makeSlug(name){
   s = s.replace(/^[\-.]+|[\-.]+$/g,'');
   return s || 'layer';
 }
+
+function hexFromRGB([r,g,b]){
+  return `#${Math.round(r).toString(16).padStart(2,'0')}${Math.round(g).toString(16).padStart(2,'0')}${Math.round(b).toString(16).padStart(2,'0')}`;
+}
+
+function currentSettingsKey(idx, angle, spacingPx, xh, xha) {
+  // cache key per layer and hatch settings
+  return `${idx}|${angle}|${spacingPx}|${xh?'1':'0'}|${xha}`;
+}
+
+function getLayerSegments(idx, angle, spacingPx, xh, xha) {
+  const key = currentSettingsKey(idx, angle, spacingPx, xh, xha);
+  if (segCache.has(key)) return segCache.get(key);
+
+  const invert = els('invert').value==='1';
+  const mask = buildMaskForLabel(idx, invert);
+  const segA = buildHatchSegments(mask, W, H, angle, spacingPx);
+  const segs = xh ? segA.concat(buildHatchSegments(mask, W, H, xha, spacingPx)) : segA;
+
+  segCache.set(key, segs);
+  return segs;
+}
+
 
 function arrayShufflePick(arr, max) { // pick up to max random items
   const a = arr.slice();
@@ -79,29 +104,7 @@ async function detectPPI(file){
   return null;
 }
 
-// ---------- KMeans (simple) ----------
-function kmeans(data, k, iters=8) {
-  // data: array of [r,g,b]
-  const n = data.length;
-  const centers = [];
-  const used = new Set();
-  for(let i=0;i<k;i++){ let idx; do{ idx=(Math.random()*n)|0; }while(used.has(idx)); used.add(idx); centers.push(data[idx].slice()); }
-  const labels = new Array(n).fill(0);
-  const dist2=(a,b)=>{ const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2]; return dr*dr+dg*dg+db*db; };
-  for(let t=0;t<iters;t++){
-    // assign
-    for(let i=0;i<n;i++){
-      let best=0, bd=Infinity; const v=data[i];
-      for(let c=0;c<k;c++){ const d=dist2(v,centers[c]); if(d<bd){bd=d; best=c;} }
-      labels[i]=best;
-    }
-    // update
-    const acc = Array.from({length:k},()=>[0,0,0,0]);
-    for(let i=0;i<n;i++){ const l=labels[i]; const v=data[i]; acc[l][0]+=v[0]; acc[l][1]+=v[1]; acc[l][2]+=v[2]; acc[l][3]++; }
-    for(let c=0;c<k;c++){ if(acc[c][3]>0){ centers[c][0]=acc[c][0]/acc[c][3]; centers[c][1]=acc[c][1]/acc[c][3]; centers[c][2]=acc[c][2]/acc[c][3]; } }
-  }
-  return {centers, labels};
-}
+
 
 // ---------- Hatching ----------
 function buildHatchSegments(mask, W, H, angleDeg, spacing){
@@ -619,9 +622,32 @@ function updateSizeUI(){
 ['borderOn','borderSize','borderUnits'].forEach(id=>{
   els(id).addEventListener('change',()=>{ if(!img) return; updateSizeUI(); });
 });
+['gAngle','gSpacing','gStrokeWidth','gCross','gCrossAngle','invert'].forEach(id=>{
+  els(id).addEventListener('change', ()=>{
+    segCache.clear();   // settings changed; invalidate cache
+    if (centers) {
+      // Rebuild the per-layer previews quickly (they’re regenerated next analyze; here we just refresh composite)
+      if (typeof renderComposite === 'function') {
+        // in case we’re outside analyzeImage scope, do a safe recompute using top-level helpers:
+        try {
+          // Minimal recompute of composite
+          const ppi = computeUsedPPI();
+          const strokeWidthMM = Number(els('gStrokeWidth').value);
+          const strokePx = (strokeWidthMM / 25.4) * ppi;
+          const bpx = getBorderPx(ppi);
+          const indices = centers.map((_,i)=>i).filter(i=>layersVisible[i]);
+          if (indices.length){
+            const svg = svgComposite(indices, W, H, ppi, strokePx, bpx, centers);
+            renderCompositeInto('compositePreview', svg);
+          }
+        } catch(e){}
+      }
+    }
+  });
+});
 
 function computeUsedPPI(){
-  return detectedPPI;
+  return detectedPPI ?? 300; 
 }
 
 function getBorderPx(ppi){
@@ -765,18 +791,88 @@ async function analyzeImage(){
   const xha = Number(els('gCrossAngle').value);
   const bpx = getBorderPx(ppi);
 
+    function selectedLayerIndices(){
+    return centersLocal
+      .map((_, idx) => ({idx, on: layersVisible[idx]}))
+      .filter(o => o.on)
+      .map(o => o.idx);
+  }
+
+  function renderComposite(){
+    els('compositePanel').style.display = 'block';
+
+    const ppi = computeUsedPPI();
+    const strokeWidthMM = Number(els('gStrokeWidth').value);
+    const strokePx = (strokeWidthMM / 25.4) * ppi;
+    const bpx = getBorderPx(ppi);
+
+    const indices = selectedLayerIndices();
+    if (indices.length === 0) {
+      els('compositePreview').innerHTML = `<div class="hint" style="padding:18px;">No layers selected.</div>`;
+      return;
+    }
+    const svg = svgComposite(indices, W, H, ppi, strokePx, bpx, centersLocal);
+    renderCompositeInto('compositePreview', svg);
+  }
+
+  function updateDownloadButtons(){
+    const anySelected = selectedLayerIndices().length > 0;
+    const zipBtn = els('downloadAll');
+    const compBtn = els('downloadComposite');
+
+    zipBtn.disabled = !anySelected;
+    compBtn.disabled = !anySelected;
+
+    // ensure they are visible now that analysis ran
+    zipBtn.style.display = 'inline-block';
+    compBtn.style.display = 'inline-block';
+  }
+
   centersLocal.forEach((rgb, i)=>{
     const d=document.createElement('div'); 
     d.className='layer';
     d.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
     d.innerHTML = `
-      <div style="font-weight:700; margin-bottom:6px; background-color:white">Layer ${i+1}: ${rgb2name(rgb)}</div>
+      <div class="row" style="align-items:center; gap:8px; margin-bottom:6px;">
+        <input type="checkbox" class="layer-toggle" data-idx="${i}" checked />
+        <div style="font-weight:700; background-color:white; flex:1;">
+          Layer ${i+1}: ${rgb2name(rgb)}
+        </div>
+        <span class="badge">#${(i+1).toString().padStart(2,'0')}</span>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="dl">Download SVG</button>
       </div>
       <div class="hint" style="margin-top:6px" data-hint></div>
     `;
+
     layers.appendChild(d);
+        // visibility state
+    if (!Array.isArray(layersVisible) || layersVisible.length !== centersLocal.length) {
+      layersVisible = Array.from({length: centersLocal.length}, () => true);
+    } else {
+      layersVisible[i] = true;
+    }
+
+    const btn = d.querySelector('.dl');
+    const toggle = d.querySelector('.layer-toggle');
+
+    const refreshButtonState = () => {
+      btn.disabled = !layersVisible[i];
+      btn.classList.toggle('secondary', !layersVisible[i]);
+      btn.title = layersVisible[i] ? '' : 'Enable this layer to download';
+    };
+    refreshButtonState();
+
+    toggle.addEventListener('change', () => {
+      layersVisible[i] = toggle.checked;
+      // clear seg cache when toggling may not be strictly required, but safe if settings changed elsewhere
+      // (we keep cache; toggling only affects inclusion)
+      refreshButtonState();
+      renderComposite(); // update composite when layer visibility changes
+      updateDownloadButtons(); // enable/disable composite/all buttons
+    });
+
 
     // Build mask & segments for this layer
     const mask = buildMaskForLabel(i, invert);
@@ -834,7 +930,6 @@ async function analyzeImage(){
     const row = d.querySelector('.row');
     d.insertBefore(preview, row);
 
-    const btn = d.querySelector('.dl');
     btn.addEventListener('click', ()=> {
       // Ensure downloaded SVG also has background
       downloadOne(i, withSvgBackground(svg, bg));
@@ -865,6 +960,27 @@ async function analyzeImage(){
   showLoading('Finalizing...', 100);
   await new Promise(r => setTimeout(r, 200));
   hideLoading();
+
+    // Show initial composite and enable buttons
+  renderComposite();
+  updateDownloadButtons();
+
+  // Download composite handler (rebuilds with current settings & selections)
+  els('downloadComposite').onclick = () => {
+    const ppi = computeUsedPPI();
+    const strokeWidthMM = Number(els('gStrokeWidth').value);
+    const strokePx = (strokeWidthMM / 25.4) * ppi;
+    const bpx = getBorderPx(ppi);
+
+    const indices = selectedLayerIndices();
+    if (indices.length === 0) return;
+
+    const svg = svgComposite(indices, W, H, ppi, strokePx, bpx, centersLocal);
+    const name = `${sourceBase}--composite.svg`;
+    const blob = new Blob([svg], {type:'image/svg+xml'});
+    saveAs(blob, name);
+  };
+
 }
 
 
@@ -879,14 +995,16 @@ function buildMaskForLabel(lbl, invert){
   return m;
 }
 
-async function downloadOne(idx, dEl){
+// BEFORE:
+// async function downloadOne(idx, dEl){
+async function downloadOne(idx){
   const invert = els('invert').value==='1';
   const ppi = computeUsedPPI();
   const angle = Number(els('gAngle').value);
   const spacingMM = Number(els('gSpacing').value);
-  const spacingPx = (spacingMM / 25.4) * ppi; // Convert mm to pixels
+  const spacingPx = (spacingMM / 25.4) * ppi;
   const strokeWidthMM = Number(els('gStrokeWidth').value);
-  const strokePx = (strokeWidthMM / 25.4) * ppi; // Convert mm to pixels
+  const strokePx = (strokeWidthMM / 25.4) * ppi;
   const xh = els('gCross').value==='Yes';
   const xha = Number(els('gCrossAngle').value);
 
@@ -894,31 +1012,38 @@ async function downloadOne(idx, dEl){
   const segA = buildHatchSegments(mask, W, H, angle, spacingPx);
   const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacingPx)) : segA;
   const bpx = getBorderPx(ppi);
+
+  // generate fresh SVG (no need to pass it in)
   const svg = svgFromSegments(segs, W, H, ppi, strokePx, bpx, centers[idx]);
+
   const name = `${sourceBase}--layer-${String(idx+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[idx]))}.svg`;
   const blob = new Blob([svg], {type:'image/svg+xml'});
   saveAs(blob, name);
-  const hint = dEl.querySelector('[data-hint]');
-  hint.textContent = `Exported ${name}`;
+
+  // update hint inside this layer card
+  const layerCard = document.querySelector(`.layer[data-layer="${idx}"] [data-hint]`);
+  if (layerCard) layerCard.textContent = `Exported ${name}`;
 }
 
+
 els('downloadAll').addEventListener('click', async ()=>{
-  const invert = els('invert').value==='1';
   const ppi = computeUsedPPI();
   const angle = Number(els('gAngle').value);
   const spacingMM = Number(els('gSpacing').value);
-  const spacingPx = (spacingMM / 25.4) * ppi; // Convert mm to pixels
+  const spacingPx = (spacingMM / 25.4) * ppi;
   const strokeWidthMM = Number(els('gStrokeWidth').value);
-  const strokePx = (strokeWidthMM / 25.4) * ppi; // Convert mm to pixels
+  const strokePx = (strokeWidthMM / 25.4) * ppi;
   const xh = els('gCross').value==='Yes';
   const xha = Number(els('gCrossAngle').value);
   const bpx = getBorderPx(ppi);
-  if(!centers){ return; }
+  if(!centers) return;
+
+  const indices = centers.map((_,i)=>i).filter(i => layersVisible[i]);
+  if (indices.length === 0) return;
+
   const zip = new JSZip();
-  for(let i=0;i<centers.length;i++){
-    const mask = buildMaskForLabel(i, invert);
-    const segA = buildHatchSegments(mask, W, H, angle, spacingPx);
-    const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacingPx)) : segA;
+  for (const i of indices){
+    const segs = getLayerSegments(i, angle, spacingPx, xh, xha);
     const svg = svgFromSegments(segs, W, H, ppi, strokePx, bpx, centers[i]);
     const name = `${sourceBase}--layer-${String(i+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[i]))}.svg`;
     zip.file(name, svg);
@@ -926,6 +1051,7 @@ els('downloadAll').addEventListener('click', async ()=>{
   const blob = await zip.generateAsync({type:'blob'});
   saveAs(blob, `${sourceBase}--layers.zip`);
 });
+
 
 // Image rotation functionality
 let currentRotation = 0;
@@ -998,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Add rotation button event listeners
   els('rotateLeft').addEventListener('click', () => rotateImage(-90));
   els('rotateRight').addEventListener('click', () => rotateImage(90));
-  
+
   // Load default image (ketubah.png) on page load
   const previewImg = document.getElementById('preview');
   const dropText = document.getElementById('dropText');
@@ -1050,3 +1176,57 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 });
+
+function svgComposite(indices, W, H, ppi, strokePx, borderPx, centers) {
+  const totalWpx = W + 2*(borderPx||0);
+  const totalHpx = H + 2*(borderPx||0);
+  const widthMM = (totalWpx/ppi)*25.4, heightMM=(totalHpx/ppi)*25.4;
+
+  const parts = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthMM.toFixed(3)}mm" height="${heightMM.toFixed(3)}mm" viewBox="0 0 ${totalWpx} ${totalHpx}">`,
+    `<rect width="100%" height="100%" fill="#ffffff"/>`
+  ];
+
+  if (borderPx>0) parts.push(`<g transform="translate(${borderPx.toFixed(2)},${borderPx.toFixed(2)})">`);
+
+  // hatch settings
+  const angle = Number(els('gAngle').value);
+  const spacingMM = Number(els('gSpacing').value);
+  const spacingPx = (spacingMM / 25.4) * ppi;
+  const xh = els('gCross').value==='Yes';
+  const xha = Number(els('gCrossAngle').value);
+
+  indices.forEach(idx => {
+    const segs = getLayerSegments(idx, angle, spacingPx, xh, xha);
+    const hex = hexFromRGB(centers[idx]);
+
+    parts.push(`<g stroke="${hex}" stroke-width="${strokePx}" stroke-linecap="round" stroke-linejoin="round" fill="none">`);
+    for (const [[x1,y1],[x2,y2]] of segs) {
+      parts.push(`<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"/>`);
+    }
+    parts.push(`</g>`);
+  });
+
+  if (borderPx>0) parts.push(`</g>`);
+  parts.push(`</svg>`);
+  return parts.join("");
+}
+
+function renderCompositeInto(containerId, svgString){
+  const el = els(containerId);
+  el.innerHTML = '';
+  const holder = document.createElement('div');
+  holder.style.width = '100%';
+  holder.style.height = '100%';
+  holder.innerHTML = svgString;
+
+  const svg = holder.querySelector('svg');
+  if (svg) {
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.style.display = 'block';
+  }
+  el.appendChild(holder);
+}

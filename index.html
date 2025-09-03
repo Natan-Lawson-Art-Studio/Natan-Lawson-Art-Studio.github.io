@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" type="image/png" href="/favicon.png">
+
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Plotta Dotta — Web</title>
@@ -69,15 +71,33 @@
 </style>
 </head>
 <body>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4/dist/tf.min.js"></script>
+
 <div class="wrap">
   <h1>Plotta Dotta — Web</h1>
   <div class="caption">Dithered image → hatched SVG layers. Strokes are black by default.</div>
 
-  <div class="panel grid cols-2">
+  <!-- Image Preview Section -->
+  <div class="panel" id="previewSection">
+    <label>Image Preview</label>
+    <div id="previewContainer" style="position: relative; min-height: 200px; border: 2px dashed #ddd; border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; background: #fafafa;">
+      <img id="preview" class="preview" alt="preview" src="ketubah.png" style="max-width: 50%; margin: 0 auto; display: block;" />
+      <div id="dropText" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-size: 16px; pointer-events: none;">
+        Drop image here or click to upload
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px; justify-content: center;">
+      <button id="rotateLeft" class="secondary">↺ Rotate Left</button>
+      <button id="rotateRight" class="secondary">↻ Rotate Right</button>
+    </div>
+    <div id="imgMeta" class="hint" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Settings Section -->
+  <div class="panel">
     <div>
       <label>Upload PNG/JPEG</label>
-      <input id="file" type="file" accept="image/png,image/jpeg" />
-      <div id="imgMeta" class="hint" style="margin-top:6px"></div>
+      <input id="file" type="file" accept="image/png,image/jpeg" style="display: none;" />
 
       <div class="row" style="margin-top:10px">
         <div>
@@ -117,6 +137,10 @@
           <input id="gSpacing" type="number" min="0.1" step="0.1" value="2" />
         </div>
         <div>
+          <label>Stroke width (mm)</label>
+          <input id="gStrokeWidth" type="number" min="0.1" step="0.1" value="2" />
+        </div>
+        <div>
           <label>Crosshatch</label>
           <select id="gCross"><option>No</option><option>Yes</option></select>
         </div>
@@ -150,14 +174,13 @@
       </div>
       <div id="err" class="hint error" style="margin-top:6px"></div>
     </div>
-
-    <div>
-      <img id="preview" class="preview" alt="preview" />
-    </div>
   </div>
 
   <div class="panel">
     <div id="swatches" class="swatches"></div>
+    <div class="row" style="margin-bottom: 10px;">
+      <button id="downloadComposite" class="secondary" style="display:none" disabled>Download Composite SVG</button>
+    </div>
     <div id="layers" class="layers"></div>
   </div>
 
@@ -191,10 +214,6 @@
       <div style="flex: 1;">
         <label>3D View Options</label>
         <div style="margin-bottom: 10px;">
-          <input type="checkbox" id="showAxes" checked>
-          <label for="showAxes" style="display: inline; font-weight: normal;">Show RGB axes</label>
-        </div>
-        <div style="margin-bottom: 10px;">
           <input type="range" id="sampleDensity" min="1" max="100" value="10">
           <label for="sampleDensity" style="display: inline; font-weight: normal;">Sample density: <span id="densityValue">10%</span></label>
         </div>
@@ -227,748 +246,9 @@
 <!-- Three.js for 3D visualization -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
-<script>
-// ---------- Helpers ----------
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const els = id => document.getElementById(id);
+<script src="/tfkmeans.js"></script>
+<script src="/ntc.js"></script>
+<script src="/process.js"></script>
 
-// Filename helpers
-function sanitizeStem(stem){
-  let s = (stem||'').trim().replace(/\s+/g,'_');
-  s = s.replace(/[^A-Za-z0-9._-]+/g,'-');
-  s = s.replace(/-+/g,'-');
-  s = s.replace(/^[\-.]+|[\-.]+$/g,'');
-  return s || 'image';
-}
-function makeSlug(name){
-  let s = (name||'').toLowerCase().trim().replace(/\s+/g,'-');
-  s = s.replace(/[^a-z0-9._-]+/g,'-');
-  s = s.replace(/-+/g,'-');
-  s = s.replace(/^[\-.]+|[\-.]+$/g,'');
-  return s || 'layer';
-}
-
-function arrayShufflePick(arr, max) { // pick up to max random items
-  const a = arr.slice();
-  for (let i=a.length-1;i>0;i--){const j=(Math.random()* (i+1))|0; [a[i],a[j]]=[a[j],a[i]]}
-  return a.slice(0, max);
-}
-
-function rgb2name([r,g,b]){
-  r/=255; g/=255; b/=255;
-  const mx=Math.max(r,g,b), mn=Math.min(r,g,b); const v=mx; const d=mx-mn; const s= mx===0?0:d/mx;
-  let h=0; if(d!==0){ if(mx===r) h=((g-b)/d)%6; else if(mx===g) h=(b-r)/d+2; else h=(r-g)/d+4; h*=60; if(h<0) h+=360; }
-  if(v<0.2) return 'black'; if(s<0.1){ if(v<0.35) return 'dark gray'; if(v<0.7) return 'gray'; if(v<0.92) return 'light gray'; return 'white'; }
-  let base = (h<15||h>=345)?'red': (h<45)?'orange': (h<70)?'yellow': (h<165)?'green': (h<200)?'cyan': (h<255)?'blue': (h<290)?'purple':'magenta';
-  const adj = v<0.35?'dark ': v>0.8?'light ':''; return (adj+base).trim();
-}
-
-// ---------- Read embedded DPI ----------
-async function detectPPI(file){
-  const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  // PNG pHYs
-  const isPNG = bytes[0]==0x89 && bytes[1]==0x50 && bytes[2]==0x4E && bytes[3]==0x47;
-  if(isPNG){
-    // scan chunks
-    let p=8; // skip signature
-    while(p+8 < bytes.length){
-      const len = (bytes[p]<<24)|(bytes[p+1]<<16)|(bytes[p+2]<<8)|bytes[p+3];
-      const type = String.fromCharCode(bytes[p+4],bytes[p+5],bytes[p+6],bytes[p+7]);
-      if(type==='pHYs' && len>=9){
-        const xppm = (bytes[p+8]<<24)|(bytes[p+9]<<16)|(bytes[p+10]<<8)|bytes[p+11];
-        const unit = bytes[p+16]; // 1=meters
-        if(unit===1){ const ppi = ((xppm>>>0) * 0.0254); return clamp(ppi,50,1200); }
-      }
-      p += 12 + len; // 4 len + 4 type + len + 4 crc
-    }
-  }
-  // JPEG JFIF/EXIF
-  const isJPG = bytes[0]==0xFF && bytes[1]==0xD8;
-  if(isJPG){
-    let p=2;
-    while(p+4<bytes.length){
-      if(bytes[p]!=0xFF) break; const marker = bytes[p+1]; const size = (bytes[p+2]<<8)|bytes[p+3];
-      if(marker==0xE0 && size>=16){ // APP0 JFIF
-        const id = String.fromCharCode(bytes[p+4],bytes[p+5],bytes[p+6],bytes[p+7],bytes[p+8]);
-        if(id.startsWith('JFIF')){
-          const units = bytes[p+9]; const xden = (bytes[p+10]<<8)|bytes[p+11]; const yden = (bytes[p+12]<<8)|bytes[p+13];
-          if(units==1){ return clamp((xden+yden)/2,50,1200); }
-          if(units==2){ return clamp(((xden+yden)/2)*2.54,50,1200); }
-        }
-      }
-      // APP1 EXIF would need TIFF parsing; skipping for brevity
-      if(marker==0xDA) break; // SOS
-      p += 2 + size;
-    }
-  }
-  return null;
-}
-
-// ---------- KMeans (simple) ----------
-function kmeans(data, k, iters=8) {
-  // data: array of [r,g,b]
-  const n = data.length;
-  const centers = [];
-  const used = new Set();
-  for(let i=0;i<k;i++){ let idx; do{ idx=(Math.random()*n)|0; }while(used.has(idx)); used.add(idx); centers.push(data[idx].slice()); }
-  const labels = new Array(n).fill(0);
-  const dist2=(a,b)=>{ const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2]; return dr*dr+dg*dg+db*db; };
-  for(let t=0;t<iters;t++){
-    // assign
-    for(let i=0;i<n;i++){
-      let best=0, bd=Infinity; const v=data[i];
-      for(let c=0;c<k;c++){ const d=dist2(v,centers[c]); if(d<bd){bd=d; best=c;} }
-      labels[i]=best;
-    }
-    // update
-    const acc = Array.from({length:k},()=>[0,0,0,0]);
-    for(let i=0;i<n;i++){ const l=labels[i]; const v=data[i]; acc[l][0]+=v[0]; acc[l][1]+=v[1]; acc[l][2]+=v[2]; acc[l][3]++; }
-    for(let c=0;c<k;c++){ if(acc[c][3]>0){ centers[c][0]=acc[c][0]/acc[c][3]; centers[c][1]=acc[c][1]/acc[c][3]; centers[c][2]=acc[c][2]/acc[c][3]; } }
-  }
-  return {centers, labels};
-}
-
-// ---------- Hatching ----------
-function buildHatchSegments(mask, W, H, angleDeg, spacing){
-  // mask: Uint8Array (0/1) length W*H
-  const rad = angleDeg * Math.PI/180;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
-  const nx = -sin, ny = cos; // normal vector
-  // project bbox corners onto normal to get range of c
-  const corners=[[0,0],[W,0],[0,H],[W,H]];
-  let cmin=Infinity, cmax=-Infinity;
-  for(const [x,y] of corners){ const c = nx*x + ny*y; if(c<cmin) cmin=c; if(c>cmax) cmax=c; }
-  const pad = spacing*2; cmin-=pad; cmax+=pad;
-  const segments = [];
-  for(let c=cmin; c<=cmax; c+=spacing){
-    // parametric line: n·p = c; direction along tangent t=(cos,sin)
-    const L = Math.hypot(W,H) + 2*pad; // span length
-    // Find a point on the line near center
-    const cx=W/2, cy=H/2; const dc = nx*cx + ny*cy; const shift = c - dc;
-    const x0 = cx + nx*shift; const y0 = cy + ny*shift;
-    // March along tangent both directions in steps ~1px
-    const step = 1; // px
-    let prevInside=false, runStart=null;
-    for(let s=-L/2; s<=L/2; s+=step){
-      const x = x0 + cos*s, y = y0 + sin*s;
-      const xi = Math.round(x), yi = Math.round(y);
-      const inside = (xi>=0 && yi>=0 && xi<W && yi<H) && (mask[yi*W+xi]===1);
-      if(inside && !prevInside){ runStart = [x,y]; }
-      if(!inside && prevInside && runStart){ segments.push([runStart, [x,y]]); runStart=null; }
-      prevInside = inside;
-    }
-    if(prevInside && runStart){ segments.push([runStart, [x0 + cos*(L/2), y0 + sin*(L/2)]]); }
-  }
-  return segments;
-}
-
-function svgFromSegments(segments, W, H, ppi, strokePx, borderPx){
-  const totalWpx = W + 2*(borderPx||0);
-  const totalHpx = H + 2*(borderPx||0);
-  const widthMM = (totalWpx/ppi)*25.4, heightMM=(totalHpx/ppi)*25.4;
-  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${widthMM.toFixed(3)}mm" height="${heightMM.toFixed(3)}mm" viewBox="0 0 ${totalWpx} ${totalHpx}">`];
-  if(borderPx>0){ parts.push(`<g transform="translate(${borderPx.toFixed(2)},${borderPx.toFixed(2)})">`); }
-  for(const seg of segments){
-    const [[x1,y1],[x2,y2]] = seg;
-    parts.push(`<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="#000" stroke-width="${strokePx}" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`);
-  }
-  if(borderPx>0){ parts.push(`</g>`); }
-  parts.push(`</svg>`);
-  return parts.join("");
-}
-
-// ---------- PCA for 3D→2D projection ----------
-function pcaProjection(data) {
-  // Simple PCA implementation for RGB→2D projection
-  const n = data.length;
-  
-  // Center the data
-  const mean = [0, 0, 0];
-  data.forEach(v => {
-    mean[0] += v[0];
-    mean[1] += v[1];
-    mean[2] += v[2];
-  });
-  mean[0] /= n; mean[1] /= n; mean[2] /= n;
-  
-  const centered = data.map(v => [v[0] - mean[0], v[1] - mean[1], v[2] - mean[2]]);
-  
-  // Compute covariance matrix
-  const cov = [
-    [0, 0, 0],
-    [0, 0, 0],
-    [0, 0, 0]
-  ];
-  
-  centered.forEach(v => {
-    cov[0][0] += v[0] * v[0];
-    cov[0][1] += v[0] * v[1];
-    cov[0][2] += v[0] * v[2];
-    cov[1][0] += v[1] * v[0];
-    cov[1][1] += v[1] * v[1];
-    cov[1][2] += v[1] * v[2];
-    cov[2][0] += v[2] * v[0];
-    cov[2][1] += v[2] * v[1];
-    cov[2][2] += v[2] * v[2];
-  });
-  
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 3; j++) {
-      cov[i][j] /= n;
-    }
-  }
-  
-  // Simple eigenvector approximation (first two principal components)
-  // For simplicity, we'll use the first two dimensions (R and G) as our projection
-  // This gives a reasonable 2D visualization of the color space
-  return data.map(v => [v[0] / 255, v[1] / 255]); // Normalize to 0-1 range
-}
-
-// ---------- Chart Visualization ----------
-function drawClusterChart(sampleData, labels, centers, k) {
-  const canvas = els('clusterChart');
-  const ctx = canvas.getContext('2d');
-  const width = canvas.width;
-  const height = canvas.height;
-  const padding = 40;
-  const chartWidth = width - 2 * padding;
-  const chartHeight = height - 2 * padding;
-  
-  // Clear canvas
-  ctx.clearRect(0, 0, width, height);
-  
-  // Project data to 2D
-  const projectedData = pcaProjection(sampleData);
-  
-  // Find data bounds
-  let minX = Infinity, maxX = -Infinity;
-  let minY = Infinity, maxY = -Infinity;
-  
-  projectedData.forEach(([x, y]) => {
-    minX = Math.min(minX, x);
-    maxX = Math.max(maxX, x);
-    minY = Math.min(minY, y);
-    maxY = Math.max(maxY, y);
-  });
-  
-  // Add some padding to bounds
-  const xRange = maxX - minX || 1;
-  const yRange = maxY - minY || 1;
-  minX -= xRange * 0.1;
-  maxX += xRange * 0.1;
-  minY -= yRange * 0.1;
-  maxY += yRange * 0.1;
-  
-  // Scale function
-  const scaleX = x => padding + ((x - minX) / (maxX - minX)) * chartWidth;
-  const scaleY = y => height - padding - ((y - minY) / (maxY - minY)) * chartHeight;
-  
-  // Draw grid
-  ctx.strokeStyle = '#eee';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let i = 0; i <= 1; i += 0.2) {
-    const x = scaleX(minX + i * (maxX - minX));
-    ctx.moveTo(x, padding);
-    ctx.lineTo(x, height - padding);
-    
-    const y = scaleY(minY + i * (maxY - minY));
-    ctx.moveTo(padding, y);
-    ctx.lineTo(width - padding, y);
-  }
-  ctx.stroke();
-  
-  // Draw axes
-  ctx.strokeStyle = '#666';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(padding, padding);
-  ctx.lineTo(padding, height - padding);
-  ctx.lineTo(width - padding, height - padding);
-  ctx.stroke();
-  
-  // Draw points with actual cluster mean colors
-  projectedData.forEach((point, i) => {
-    const cluster = labels[i];
-    const [x, y] = point;
-    const rgb = centers[cluster];
-    
-    // Use the actual cluster color with some transparency
-    ctx.fillStyle = `rgba(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])}, 0.7)`;
-    ctx.beginPath();
-    ctx.arc(scaleX(x), scaleY(y), 4, 0, 2 * Math.PI);
-    ctx.fill();
-  });
-  
-  // Draw centroids if enabled
-  if (els('showCentroids').checked) {
-    const projectedCenters = pcaProjection(centers);
-    
-    projectedCenters.forEach((point, i) => {
-      const [x, y] = point;
-      const rgb = centers[i];
-      
-      // Draw centroid circle with actual cluster color
-      ctx.fillStyle = `rgb(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])})`;
-      ctx.beginPath();
-      ctx.arc(scaleX(x), scaleY(y), 8, 0, 2 * Math.PI);
-      ctx.fill();
-      
-      // Add black border for better visibility
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      
-      // Draw cluster label if enabled
-      if (els('showLabels').checked) {
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 12px system-ui';
-        ctx.textAlign = 'center';
-        ctx.fillText(`Cluster ${i + 1}`, scaleX(x), scaleY(y) - 15);
-      }
-    });
-  }
-  
-  // Draw axis labels
-  ctx.fillStyle = '#666';
-  ctx.font = '12px system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText('Red Component', width / 2, height - 10);
-  ctx.textAlign = 'right';
-  ctx.fillText('Green Component', 30, height / 2);
-}
-
-// ---------- 3D Visualization with Three.js ----------
-let scene, camera, renderer, controls;
-let animationId = null;
-
-function initThreeDScene() {
-  const container = els('threeDContainer');
-  
-  // Clear previous scene if it exists
-  if (renderer) {
-    container.innerHTML = '';
-    if (animationId) {
-      cancelAnimationFrame(animationId);
-      animationId = null;
-    }
-  }
-  
-  // Create scene
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf8f9fa);
-  
-  // Create camera
-  camera = new THREE.PerspectiveCamera(75, 400 / 400, 0.1, 1000);
-  camera.position.set(150, 150, 200);
-  
-  // Create renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(400, 400);
-  container.appendChild(renderer.domElement);
-  
-  // Add orbit controls
-  controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-  
-  // Add ambient light
-  const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
-  scene.add(ambientLight);
-  
-  // Add directional light
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  directionalLight.position.set(1, 1, 1);
-  scene.add(directionalLight);
-  
-  // Add RGB axes if enabled
-  if (els('showAxes').checked) {
-    addRGBaxes();
-  }
-}
-
-function addRGBaxes() {
-  // Remove existing axes if any
-  scene.children.filter(child => child.userData.isAxis).forEach(axis => scene.remove(axis));
-  
-  // Create RGB axes
-  const axes = [
-    { color: 0xff0000, direction: new THREE.Vector3(1, 0, 0), label: 'R' },
-    { color: 0x00ff00, direction: new THREE.Vector3(0, 1, 0), label: 'G' },
-    { color: 0x0000ff, direction: new THREE.Vector3(0, 0, 1), label: 'B' }
-  ];
-  
-  axes.forEach((axis, index) => {
-    // Axis line
-    const geometry = new THREE.BufferGeometry();
-    const vertices = new Float32Array([
-      0, 0, 0,
-      axis.direction.x * 110, axis.direction.y * 110, axis.direction.z * 110
-    ]);
-    geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-    const material = new THREE.LineBasicMaterial({ color: axis.color });
-    const line = new THREE.Line(geometry, material);
-    line.userData.isAxis = true;
-    scene.add(line);
-  });
-}
-
-function createColorVisualization(sampleData, centers, density) {
-  // Clear existing visualization objects
-  scene.children.filter(child => child.userData.isVisualizationObject).forEach(obj => scene.remove(obj));
-  
-  const sampleCount = Math.max(1, Math.floor(sampleData.length * (density / 100)));
-  
-  // Use instancing for better performance with many pixels
-  const boxGeometry = new THREE.BoxGeometry(2, 2, 2);
-  const pixelMaterial = new THREE.MeshBasicMaterial({
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.7
-  });
-  
-  // Create instanced mesh for pixels
-  const pixelMesh = new THREE.InstancedMesh(boxGeometry, pixelMaterial, sampleCount);
-  pixelMesh.userData.isVisualizationObject = true;
-  pixelMesh.userData.type = 'pixels';
-  
-  const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
-  
-  for (let i = 0; i < sampleCount; i++) {
-    const rgb = sampleData[i];
-    const [r, g, b] = rgb;
-    
-    // Set position (centered around 127.5, 127.5, 127.5)
-    dummy.position.set(r - 127.5, g - 127.5, b - 127.5);
-    dummy.updateMatrix();
-    pixelMesh.setMatrixAt(i, dummy.matrix);
-    
-    // Set color
-    color.setRGB(r / 255, g / 255, b / 255);
-    pixelMesh.setColorAt(i, color);
-  }
-  
-  pixelMesh.instanceMatrix.needsUpdate = true;
-  if (pixelMesh.instanceColor) pixelMesh.instanceColor.needsUpdate = true;
-  scene.add(pixelMesh);
-  
-  // Create spheres for k-means centroids (not instanced since there are only a few)
-  if (centers && centers.length > 0) {
-    const sphereGeometry = new THREE.SphereGeometry(10, 16, 16); // Increased sphere size
-    
-    centers.forEach((rgb, index) => {
-      const [r, g, b] = rgb;
-      
-      // Create material for centroid sphere (no shadows)
-      const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(r / 255, g / 255, b / 255),
-        transparent: true,
-        opacity: 1.0
-      });
-      
-      // Create sphere for centroid
-      const sphere = new THREE.Mesh(sphereGeometry, material);
-      sphere.userData.isVisualizationObject = true;
-      sphere.userData.type = 'centroid';
-      
-      // Position in RGB space (centered around 127.5, 127.5, 127.5)
-      sphere.position.set(r - 127.5, g - 127.5, b - 127.5);
-      
-      scene.add(sphere);
-    });
-  }
-  
-  // Create a cube around the entire color space (0-255 range)
-  const cubeSize = 255;
-  const cubeGeometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
-  const cubeMaterial = new THREE.MeshBasicMaterial({
-    color: 0x000000,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.3
-  });
-  
-  const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
-  cube.userData.isVisualizationObject = true;
-  cube.userData.type = 'boundingCube';
-  cube.position.set(-127.5, -127.5, -127.5); // Center the cube
-  scene.add(cube);
-}
-
-function animate() {
-  animationId = requestAnimationFrame(animate);
-  
-  if (els('animateRotation').checked) {
-    scene.rotation.y += 0.005;
-  }
-  
-  controls.update();
-  renderer.render(scene, camera);
-}
-
-function update3DVisualization(sampleData, centers) {
-  const density = parseInt(els('sampleDensity').value);
-  els('densityValue').textContent = `${density}%`;
-  
-  initThreeDScene();
-  createColorVisualization(sampleData, centers, density);
-  animate();
-}
-
-// Event listeners for 3D controls
-els('showAxes').addEventListener('change', () => {
-  if (els('showAxes').checked) {
-    addRGBaxes();
-  } else {
-    scene.children.filter(child => child.userData.isAxis).forEach(axis => scene.remove(axis));
-  }
-});
-
-els('sampleDensity').addEventListener('input', () => {
-  if (sampleDataFor3D && centers) {
-    const density = parseInt(els('sampleDensity').value);
-    els('densityValue').textContent = `${density}%`;
-    createColorVisualization(sampleDataFor3D, centers, density);
-  }
-});
-
-els('animateRotation').addEventListener('change', () => {
-  if (!els('animateRotation').checked && animationId) {
-    cancelAnimationFrame(animationId);
-    animationId = null;
-  } else if (els('animateRotation').checked && !animationId && renderer) {
-    animate();
-  }
-});
-
-// ---------- State ----------
-let img=null, W=0, H=0, pixels=null, fileObj=null, detectedPPI=null, labelMap=null, centers=null, sourceBase='image';
-let sampleDataFor3D = null;
-
-const fileEl = els('file');
-fileEl.addEventListener('change', async (e)=>{
-  const f = e.target.files[0]; if(!f) return;
-  fileObj=f;
-  // derive source base name from uploaded file
-  sourceBase = sanitizeStem(f.name.replace(/\.[^.]+$/, ""));
-  detectedPPI = await detectPPI(f);
-  const url = URL.createObjectURL(f);
-  const im = new Image();
-    im.onload = ()=>{
-    img = im; W=im.naturalWidth; H=im.naturalHeight;
-    els('preview').src = url;
-    const cvs=document.createElement('canvas'); cvs.width=W; cvs.height=H;
-    const ctx=cvs.getContext('2d'); ctx.drawImage(im,0,0);
-    pixels = ctx.getImageData(0,0,W,H).data; // RGBA
-    updateSizeUI();
-  };
-  im.src=url;
-});
-
-function updateSizeUI(){
-  setExportInfo();
-  updateImageMetadata(detectedPPI);
-}
-['borderOn','borderSize','borderUnits'].forEach(id=>{
-  els(id).addEventListener('change',()=>{ if(!img) return; updateSizeUI(); });
-});
-
-function computeUsedPPI(){
-  return detectedPPI;
-}
-
-function getBorderPx(ppi){
-  if(els('borderOn').value==='No') return 0;
-  const v = Number(els('borderSize').value)||0;
-  const u = els('borderUnits').value;
-  if(u==='in') return v*ppi;
-  if(u==='mm') return (v/25.4)*ppi;
-  return 0;
-}
-
-function setExportInfo(){
-  const ppi=computeUsedPPI();
-  const b = getBorderPx(ppi);
-  const wIn=(W + 2*b)/ppi, hIn=(H + 2*b)/ppi;
-  els('exportInfo').textContent = `SVG export size ≈ ${wIn.toFixed(3)} in × ${hIn.toFixed(3)} in @ ${ppi.toFixed(2)} PPI${b>0? ' (includes blank border)':''}.`;
-}
-
-// Update image metadata display with simplified format
-function updateImageMetadata(ppi){
-  if(!img) return;
-  
-  const currentPPI = ppi || computeUsedPPI();
-  const widthIn = W / currentPPI;
-  const heightIn = H / currentPPI;
-  
-  let metadataText = `Artwork Size: ${widthIn.toFixed(1)}" × ${heightIn.toFixed(1)}" (${currentPPI.toFixed(0)} DPI)`;
-  
-  els('imgMeta').textContent = metadataText;
-}
-
-// Loading functions
-function showLoading(text, progress) {
-  els('loadingContainer').style.display = 'flex';
-  els('loadingText').textContent = text;
-  els('loadingProgress').style.width = `${progress}%`;
-}
-
-function hideLoading() {
-  els('loadingContainer').style.display = 'none';
-}
-
-// Analyze & build layers
-els('analyze').addEventListener('click', async ()=>{
-  if(!fileObj){ els('err').textContent = 'Please select a PNG or JPEG first.'; return; }
-  els('err').textContent='';
-  if(!img) return;
-  
-  // Show loading
-  showLoading('Sampling image colors...', 10);
-  
-  const invert = els('invert').value==='1';
-  const total = W*H; const maxSample = Math.min(total, 200000);
-  
-  // Use setTimeout to allow UI to update
-  await new Promise(resolve => setTimeout(resolve, 50));
-  
-  showLoading('Sampling image colors...', 30);
-  const idxs = arrayShufflePick([...Array(total).keys()], maxSample);
-  const sample = idxs.map(i=>[pixels[i*4], pixels[i*4+1], pixels[i*4+2]]);
-
-  // Auto K if 0
-  let kRaw = Number(els('k').value)|0; let k;
-  if(kRaw<=0){
-    const uniq = new Set(sample.map(v=> (v[0]<<16)|(v[1]<<8)|v[2] ));
-    const est = Math.round(Math.sqrt(uniq.size));
-    k = clamp(est,2,12);
-  } else { k = clamp(kRaw,2,12); }
-
-  showLoading('Running K-Means clustering...', 50);
-  await new Promise(resolve => setTimeout(resolve, 50));
-  
-  const {centers:c, labels} = kmeans(sample, k, 8);
-  centers = c.map(v=>[v[0],v[1],v[2]]);
-  
-  showLoading('Assigning labels to pixels...', 70);
-  await new Promise(resolve => setTimeout(resolve, 50));
-  
-  labelMap = new Uint8Array(total);
-  function d2(a,b){ const dr=a[0]-b[0],dg=a[1]-b[1],db=a[2]-b[2]; return dr*dr+dg*dg+db*db; }
-  for(let i=0;i<total;i++){
-    const v=[pixels[i*4],pixels[i*4+1],pixels[i*4+2]]; let best=0,bd=Infinity;
-    for(let cIdx=0;cIdx<k;cIdx++){ const dd=d2(v,centers[cIdx]); if(dd<bd){bd=dd; best=cIdx;} }
-    labelMap[i]=best;
-  }
-  // order centers by brightness (darkest first)
-  const br = centers.map((v,i)=>[ (v[0]+v[1]+v[2])/3, i ]).sort((a,b)=>a[0]-b[0]);
-  centers = br.map(([_,i])=>centers[i]);
-  const remap = new Uint8Array(k); br.forEach(([,i],j)=>remap[i]=j);
-  for(let i=0;i<total;i++) labelMap[i]=remap[labelMap[i]];
-
-  showLoading('Building UI components...', 90);
-  await new Promise(resolve => setTimeout(resolve, 50));
-
-  // UI
-  const sw = els('swatches'); sw.innerHTML='';
-  centers.forEach(rgb=>{
-    const s=document.createElement('div'); s.className='sw'; s.style.background=`rgb(${rgb.map(x=>x|0).join(',')})`;
-    s.title = rgb2name(rgb);
-    sw.appendChild(s);
-  });
-
-  const layers = els('layers'); layers.innerHTML='';
-  centers.forEach((rgb, i)=>{
-    const d=document.createElement('div'); d.className='layer';
-    d.innerHTML = `
-      <div style=\"font-weight:700; margin-bottom:6px;\">Layer ${i+1}: ${rgb2name(rgb)}</div>
-      <div class=\"row\" style=\"margin-top:10px\">\n        <button class=\"dl\">Download SVG</button>\n      </div>
-      <div class=\"hint\" style=\"margin-top:6px\" data-hint></div>
-    `;
-    layers.appendChild(d);
-
-    const btn = d.querySelector('.dl');
-    btn.addEventListener('click', ()=> downloadOne(i, d));
-  });
-
-  const zipBtn = els('downloadAll');
-  zipBtn.style.display='inline-block';
-  zipBtn.disabled=false;
-
-  // Show and draw the cluster chart
-  els('chartPanel').style.display = 'block';
-  drawClusterChart(sample, labels, centers, k);
-  
-  // Add event listeners for chart options
-  els('showCentroids').addEventListener('change', () => {
-    drawClusterChart(sample, labels, centers, k);
-  });
-  els('showLabels').addEventListener('change', () => {
-    drawClusterChart(sample, labels, centers, k);
-  });
-
-  // Show and update 3D visualization
-  els('threeDPanel').style.display = 'block';
-  sampleDataFor3D = sample;
-  update3DVisualization(sample, centers);
-
-  showLoading('Finalizing...', 100);
-  await new Promise(resolve => setTimeout(resolve, 200));
-  hideLoading();
-});
-
-function buildMaskForLabel(lbl, invert){
-  const m = new Uint8Array(W*H);
-  for(let i=0;i<W*H;i++){ m[i] = (labelMap[i]===lbl) ? 1 : 0; }
-  if(invert){ for(let i=0;i<W*H;i++) m[i]=m[i]?0:1; }
-  return m;
-}
-
-async function downloadOne(idx, dEl){
-  const invert = els('invert').value==='1';
-  const ppi = computeUsedPPI();
-  const angle = Number(els('gAngle').value);
-  const spacingMM = Number(els('gSpacing').value);
-  const spacingPx = (spacingMM / 25.4) * ppi; // Convert mm to pixels
-  const xh = els('gCross').value==='Yes';
-  const xha = Number(els('gCrossAngle').value);
-
-  const mask = buildMaskForLabel(idx, invert);
-  const segA = buildHatchSegments(mask, W, H, angle, spacingPx);
-  const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacingPx)) : segA;
-  const bpx = getBorderPx(ppi);
-  const svg = svgFromSegments(segs, W, H, ppi, 0.6, bpx); // Fixed stroke width of 0.6px
-  const name = `${sourceBase}--layer-${String(idx+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[idx]))}.svg`;
-  const blob = new Blob([svg], {type:'image/svg+xml'});
-  saveAs(blob, name);
-  const hint = dEl.querySelector('[data-hint]');
-  hint.textContent = `Exported ${name}`;
-}
-
-els('downloadAll').addEventListener('click', async ()=>{
-  const invert = els('invert').value==='1';
-  const ppi = computeUsedPPI();
-  const angle = Number(els('gAngle').value);
-  const spacingMM = Number(els('gSpacing').value);
-  const spacingPx = (spacingMM / 25.4) * ppi; // Convert mm to pixels
-  const xh = els('gCross').value==='Yes';
-  const xha = Number(els('gCrossAngle').value);
-  const bpx = getBorderPx(ppi);
-  if(!centers){ return; }
-  const zip = new JSZip();
-  for(let i=0;i<centers.length;i++){
-    const mask = buildMaskForLabel(i, invert);
-    const segA = buildHatchSegments(mask, W, H, angle, spacingPx);
-    const segs = xh ? segA.concat(buildHatchSegments(mask,W,H,xha,spacingPx)) : segA;
-    const svg = svgFromSegments(segs, W, H, ppi, 0.6, bpx); // Fixed stroke width of 0.6px
-    const name = `${sourceBase}--layer-${String(i+1).padStart(2,'0')}-${makeSlug(rgb2name(centers[i]))}.svg`;
-    zip.file(name, svg);
-  }
-  const blob = await zip.generateAsync({type:'blob'});
-  saveAs(blob, `${sourceBase}--layers.zip`);
-});
-</script>
 </body>
 </html>
